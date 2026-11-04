@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">MobileMirror Audio Agent</string>
+    <string name="status_idle">Audio Capture: Idle</string>
+    <string name="status_capturing">Audio Capture: Active (Streaming to Windows USB)</string>
+    <string name="btn_start">Start Audio Capture</string>
+    <string name="btn_stop">Stop Audio Capture</string>
+    <string name="notification_title">MobileMirror Audio Agent</string>
+    <string name="notification_text">Streaming game audio to Windows over USB</string>
+    <string name="output_route_label">Active Output Route:</string>
+    <string name="desc_universal">Game audio plays locally through your phone speakers or connected headset, while an independent PCM stream is sent to Windows over USB.</string>
+</resources>
+
