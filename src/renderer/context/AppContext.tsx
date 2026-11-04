@@ -27,6 +27,16 @@ interface AppState {
     streamUrl?: string;
     error?: string;
   };
+  obsStatus: {
+    state: 'disconnected' | 'connecting' | 'connected' | 'error';
+    url: string;
+    version?: string;
+    error?: string | null;
+    isStreaming: boolean;
+    isRecording: boolean;
+    recordingTimecode?: string;
+    streamingTimecode?: string;
+  };
   toolStatus: SystemToolsInfo;
   videoSettings: VideoSettings;
   audioSettings: AudioSettings;
@@ -43,11 +53,18 @@ const initialState: AppState = {
   companionAudio: {
     status: 'idle',
   },
+  obsStatus: {
+    state: 'disconnected',
+    url: 'ws://127.0.0.1:4455',
+    isStreaming: false,
+    isRecording: false,
+  },
   toolStatus: {
     adb: { name: 'ADB', toolType: 'adb', status: 'missing', error: 'Checking installation...' },
     scrcpy: { name: 'scrcpy', toolType: 'scrcpy', status: 'missing', error: 'Checking installation...' },
     ffmpeg: { name: 'FFmpeg', toolType: 'ffmpeg', status: 'missing', error: 'Checking installation...' },
     ffprobe: { name: 'ffprobe', toolType: 'ffprobe', status: 'missing', error: 'Checking installation...' },
+    obs: { name: 'OBS Studio', toolType: 'obs', status: 'missing', error: 'Checking installation...' },
   },
   videoSettings: {
     resolution: '1920',
@@ -67,6 +84,12 @@ const initialState: AppState = {
     outputFormat: 'mp4',
     virtualCamera: false,
     overlayEnabled: false,
+    youtubeRtmpUrl: 'rtmp://a.rtmp.youtube.com/live2',
+    youtubeStreamKey: '',
+    obsWebSocketUrl: 'ws://127.0.0.1:4455',
+    obsWebSocketPassword: '',
+    audioSyncOffsetMs: 0,
+    mutePcAudioPlayback: false,
   },
   appSettings: {
     theme: 'dark',
@@ -77,6 +100,11 @@ const initialState: AppState = {
     scrcpyPath: '',
     ffmpegPath: '',
     ffprobePath: '',
+    obsPath: '',
+    obsWebSocketUrl: 'ws://127.0.0.1:4455',
+    obsWebSocketPassword: '',
+    youtubeStreamKey: '',
+    audioSyncOffsetMs: 0,
     language: 'en',
   },
 };
@@ -94,6 +122,7 @@ type AppAction =
   | { type: 'SET_SESSION'; payload: { deviceId: string; pid?: number; status: string; options?: any; audioEnabled?: boolean; audioStatus?: 'forwarding' | 'disabled' | 'error'; audioError?: string } }
   | { type: 'SET_AUDIO_ERROR'; payload: { deviceId: string; error: string } }
   | { type: 'SET_COMPANION_AUDIO'; payload: { status: CompanionAudioStatus; deviceId?: string; streamUrl?: string; error?: string } }
+  | { type: 'SET_OBS_STATUS'; payload: Partial<AppState['obsStatus']> }
   | { type: 'REMOVE_SESSION'; payload: string }
   | { type: 'SET_TOOL_STATUS'; payload: SystemToolsInfo }
   | { type: 'UPDATE_VIDEO_SETTINGS'; payload: Partial<VideoSettings> }
@@ -152,6 +181,14 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         companionAudio: {
           ...state.companionAudio,
+          ...action.payload,
+        },
+      };
+    case 'SET_OBS_STATUS':
+      return {
+        ...state,
+        obsStatus: {
+          ...state.obsStatus,
           ...action.payload,
         },
       };
@@ -296,9 +333,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    if (window.electronAPI.onDeviceDisconnected) {
-      window.electronAPI.onDeviceDisconnected((devId: string) => {
-        dispatch({ type: 'REMOVE_DEVICE', payload: devId });
+    // 5. OBS WebSocket Status listeners
+    if (window.electronAPI.obs) {
+      window.electronAPI.obs.getStatus().then((status: any) => {
+        if (status) {
+          dispatch({ type: 'SET_OBS_STATUS', payload: status });
+        }
+      }).catch(() => {});
+
+      window.electronAPI.obs.onStatusChanged((status: any) => {
+        dispatch({ type: 'SET_OBS_STATUS', payload: status });
+      });
+
+      window.electronAPI.obs.onRecordStateChanged((rec: any) => {
+        dispatch({
+          type: 'SET_OBS_STATUS',
+          payload: { isRecording: rec.active },
+        });
+      });
+
+      window.electronAPI.obs.onStreamStateChanged((stream: any) => {
+        dispatch({
+          type: 'SET_OBS_STATUS',
+          payload: { isStreaming: stream.active },
+        });
       });
     }
   }, [dispatch]);

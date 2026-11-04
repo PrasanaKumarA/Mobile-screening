@@ -18,7 +18,7 @@ export type MirroringStatus = 'idle' | 'starting' | 'active' | 'stopping' | 'err
 export type ToolStatus = 'installed' | 'missing' | 'error';
 
 /** Tool type */
-export type ToolType = 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe';
+export type ToolType = 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe' | 'obs';
 
 /** Individual tool information */
 export interface ToolInfo {
@@ -36,6 +36,7 @@ export interface SystemToolsInfo {
   scrcpy: ToolInfo;
   ffmpeg: ToolInfo;
   ffprobe?: ToolInfo;
+  obs?: ToolInfo;
 }
 
 /** A connected device */
@@ -98,6 +99,12 @@ export interface StreamingSettings {
   outputFormat: string;
   virtualCamera: boolean;
   overlayEnabled: boolean;
+  youtubeRtmpUrl?: string;
+  youtubeStreamKey?: string;
+  obsWebSocketUrl?: string;
+  obsWebSocketPassword?: string;
+  audioSyncOffsetMs?: number;
+  mutePcAudioPlayback?: boolean;
 }
 
 /** Application preferences */
@@ -110,6 +117,11 @@ export interface AppSettings {
   scrcpyPath: string;
   ffmpegPath: string;
   ffprobePath: string;
+  obsPath: string;
+  obsWebSocketUrl?: string;
+  obsWebSocketPassword?: string;
+  youtubeStreamKey?: string;
+  audioSyncOffsetMs?: number;
   language: string;
 }
 
@@ -148,6 +160,50 @@ export interface AudioLevelMetrics {
   peak: number; // 0 - 100%
   rms: number;  // 0 - 100%
   dB: number;   // -60 to 0 dB
+}
+
+export interface AudioSyncMetrics {
+  streamStartTime: number;
+  lastPacketTimestamp: number;
+  totalBytesReceived: number;
+  totalAudioDurationMs: number;
+  wallClockElapsedMs: number;
+  driftMs: number;
+  syncOffsetMs: number;
+  underrunCount: number;
+  clippingCount: number;
+  isClipping: boolean;
+  sampleRate: number;
+  channels: number;
+}
+
+export type ObsConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface ObsStatusInfo {
+  state: ObsConnectionState;
+  url: string;
+  version?: string;
+  error?: string | null;
+  isStreaming: boolean;
+  isRecording: boolean;
+  recordingTimecode?: string;
+  streamingTimecode?: string;
+}
+
+export interface ObsRecordStatus {
+  active: boolean;
+  paused: boolean;
+  timecode: string;
+  bytes: number;
+  duration: number;
+  outputPath?: string;
+}
+
+export interface ObsStreamStatus {
+  active: boolean;
+  timecode: string;
+  bytes: number;
+  kbitsPerSec: number;
 }
 
 export type CompanionAudioStatus =
@@ -217,10 +273,37 @@ export interface ElectronAPI {
     getStreamUrl: () => Promise<string>;
     getStats: () => Promise<CompanionAudioStats>;
     getAudioRoute: (deviceId: string) => Promise<AudioRouteInfo>;
+    getSyncMetrics?: () => Promise<AudioSyncMetrics>;
+    setSyncOffset?: (offsetMs: number) => Promise<{ success: boolean; offsetMs: number }>;
     onStatusChanged: (callback: (data: { status: CompanionAudioStatus; deviceId?: string; streamUrl?: string; error?: string }) => void) => void;
     onAudioLevel: (callback: (metrics: AudioLevelMetrics) => void) => void;
     onPcmData?: (callback: (chunk: Uint8Array) => void) => void;
   };
+  obs?: {
+    connect: (url?: string, password?: string) => Promise<{ success: boolean; version?: string; error?: string }>;
+    disconnect: () => Promise<{ success: boolean }>;
+    getStatus: () => Promise<ObsStatusInfo>;
+    getRecordStatus: () => Promise<ObsRecordStatus>;
+    getStreamStatus: () => Promise<ObsStreamStatus>;
+    startRecording: () => Promise<{ success: boolean; error?: string }>;
+    stopRecording: () => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+    startStreaming: () => Promise<{ success: boolean; error?: string }>;
+    stopStreaming: () => Promise<{ success: boolean; error?: string }>;
+    getScenes: () => Promise<{ currentProgramSceneName: string; scenes: string[] }>;
+    setupSources: (options: Record<string, any>) => Promise<{ success: boolean; message: string }>;
+    runTestRecording: (durationSeconds: number) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+    onStatusChanged: (callback: (data: ObsStatusInfo) => void) => void;
+    onRecordStateChanged: (callback: (data: { active: boolean; state: string; outputPath?: string }) => void) => void;
+    onStreamStateChanged: (callback: (data: { active: boolean; state: string }) => void) => void;
+  };
+  onDeviceConnected: (callback: (device: Device) => void) => void;
+  onDeviceDisconnected: (callback: (deviceId: string) => void) => void;
+  onDeviceUnauthorized: (callback: (device: { id: string; name: string }) => void) => void;
+  onMirroringStarted: (callback: (session: any) => void) => void;
+  onMirroringStopped: (callback: (data: { deviceId: string; code?: number }) => void) => void;
+  onMirroringError: (callback: (data: { deviceId: string; error: string }) => void) => void;
+  onMirroringAudioError: (callback: (data: { deviceId: string; error: string }) => void) => void;
+}
   onDeviceConnected: (callback: (device: Device) => void) => void;
   onDeviceDisconnected: (callback: (deviceId: string) => void) => void;
   onDeviceUnauthorized: (callback: (device: { id: string; name: string }) => void) => void;

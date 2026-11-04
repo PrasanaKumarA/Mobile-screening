@@ -7,6 +7,7 @@ import { CaptureService } from './services/capture.service';
 import { ToolDetectionService, ToolType, SystemToolsInfo } from './services/tool-detection.service';
 import { SettingsService, StoredSettings } from './services/settings.service';
 import { AudioCompanionService } from './services/audio-companion.service';
+import { ObsWebSocketService } from './services/obs-websocket.service';
 
 // Allow automatic unmuted audio playback without requiring page clicks
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -18,6 +19,7 @@ const captureService = new CaptureService();
 const toolDetectionService = new ToolDetectionService();
 const settingsService = new SettingsService();
 const audioCompanionService = new AudioCompanionService();
+const obsWebSocketService = new ObsWebSocketService();
 
 /**
  * Apply resolved tool paths to backend services
@@ -134,6 +136,8 @@ function createWindow(): void {
     if (scrcpyService.isMirroring(deviceId)) {
       scrcpyService.stopMirroring(deviceId);
     }
+    // Cleanly recover audio pipeline on USB disconnect
+    audioCompanionService.handleDeviceDisconnected(deviceId);
     mainWindow?.webContents.send('device:disconnected', deviceId);
   });
 
@@ -164,6 +168,19 @@ function createWindow(): void {
 
   audioCompanionService.on('pcm-data', (chunk: Buffer) => {
     mainWindow?.webContents.send('audioCompanion:pcm', chunk);
+  });
+
+  // Forward OBS WebSocket service events to renderer
+  obsWebSocketService.on('status-changed', (data) => {
+    mainWindow?.webContents.send('obs:statusChanged', data);
+  });
+
+  obsWebSocketService.on('record-state-changed', (data) => {
+    mainWindow?.webContents.send('obs:recordStateChanged', data);
+  });
+
+  obsWebSocketService.on('stream-state-changed', (data) => {
+    mainWindow?.webContents.send('obs:streamStateChanged', data);
   });
 }
 
@@ -204,6 +221,7 @@ ipcMain.handle('tools:checkAll', async () => {
     scrcpyPath: settings.scrcpyPath,
     ffmpegPath: settings.ffmpegPath,
     ffprobePath: settings.ffprobePath,
+    obsPath: settings.obsPath,
   });
   await applyToolPaths(tools);
   return tools;
@@ -229,6 +247,7 @@ ipcMain.handle('tools:browse', async (_event, tool: ToolType) => {
     scrcpy: 'scrcpy.exe (Screen Copy)',
     ffmpeg: 'ffmpeg.exe (FFmpeg)',
     ffprobe: 'ffprobe.exe (ffprobe Media Prober)',
+    obs: 'obs64.exe (OBS Studio 64-bit)',
   };
 
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -260,6 +279,7 @@ ipcMain.handle('tools:saveSettings', async (_event, partialSettings: Partial<Sto
     scrcpyPath: updatedSettings.scrcpyPath,
     ffmpegPath: updatedSettings.ffmpegPath,
     ffprobePath: updatedSettings.ffprobePath,
+    obsPath: updatedSettings.obsPath,
   });
   await applyToolPaths(tools);
   return { settings: updatedSettings, tools };
@@ -380,6 +400,76 @@ ipcMain.handle('audioCompanion:getAudioRoute', async (_event, deviceId: string) 
   return audioCompanionService.getAudioRoute(deviceId);
 });
 
+ipcMain.handle('audioCompanion:getSyncMetrics', async () => {
+  return audioCompanionService.getSyncMetrics();
+});
+
+ipcMain.handle('audioCompanion:setSyncOffset', async (_event, offsetMs: number) => {
+  audioCompanionService.setSyncOffset(offsetMs);
+  return { success: true, offsetMs };
+});
+
+// ============================================================
+// OBS Studio & OBS WebSocket IPC Handlers
+// ============================================================
+
+ipcMain.handle('obs:connect', async (_event, url?: string, password?: string) => {
+  const settings = settingsService.getSettings();
+  const targetUrl = url || settings.obsWebSocketUrl || 'ws://127.0.0.1:4455';
+  const targetPassword = password !== undefined ? password : settings.obsWebSocketPassword;
+  return obsWebSocketService.connect(targetUrl, targetPassword);
+});
+
+ipcMain.handle('obs:disconnect', async () => {
+  obsWebSocketService.disconnect();
+  return { success: true };
+});
+
+ipcMain.handle('obs:getStatus', async () => {
+  return obsWebSocketService.getStatus();
+});
+
+ipcMain.handle('obs:getRecordStatus', async () => {
+  return obsWebSocketService.getRecordStatus();
+});
+
+ipcMain.handle('obs:getStreamStatus', async () => {
+  return obsWebSocketService.getStreamStatus();
+});
+
+ipcMain.handle('obs:startRecording', async () => {
+  return obsWebSocketService.startRecording();
+});
+
+ipcMain.handle('obs:stopRecording', async () => {
+  return obsWebSocketService.stopRecording();
+});
+
+ipcMain.handle('obs:startStreaming', async () => {
+  return obsWebSocketService.startStreaming();
+});
+
+ipcMain.handle('obs:stopStreaming', async () => {
+  return obsWebSocketService.stopStreaming();
+});
+
+ipcMain.handle('obs:getScenes', async () => {
+  return obsWebSocketService.getSceneList();
+});
+
+ipcMain.handle('obs:setupSources', async (_event, options: Record<string, any>) => {
+  return obsWebSocketService.setupMobileMirrorSources({
+    sceneName: options.sceneName,
+    deviceId: options.deviceId,
+    streamUrl: options.streamUrl || audioCompanionService.getStreamUrl(),
+    syncOffsetMs: options.syncOffsetMs !== undefined ? options.syncOffsetMs : audioCompanionService.getSyncOffset(),
+  });
+});
+
+ipcMain.handle('obs:runTestRecording', async (_event, durationSeconds: number = 10) => {
+  return obsWebSocketService.runTestRecording(durationSeconds);
+});
+
 app.whenReady().then(async () => {
   createWindow();
 
@@ -390,8 +480,14 @@ app.whenReady().then(async () => {
     scrcpyPath: settings.scrcpyPath,
     ffmpegPath: settings.ffmpegPath,
     ffprobePath: settings.ffprobePath,
+    obsPath: settings.obsPath,
   });
   await applyToolPaths(initialTools);
+
+  // Set initial sync offset from settings if configured
+  if (settings.audioSyncOffsetMs) {
+    audioCompanionService.setSyncOffset(settings.audioSyncOffsetMs);
+  }
 
   // Start background device polling
   adbService.startDevicePolling(2500);
@@ -402,6 +498,7 @@ app.on('window-all-closed', () => {
   scrcpyService.dispose();
   captureService.dispose();
   audioCompanionService.dispose();
+  obsWebSocketService.dispose();
   app.quit();
 });
 

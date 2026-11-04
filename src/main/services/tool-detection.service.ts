@@ -18,7 +18,7 @@ import { execFile, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type ToolType = 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe';
+export type ToolType = 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe' | 'obs';
 export type ToolStatus = 'installed' | 'missing' | 'error';
 
 export interface ToolInfo {
@@ -35,6 +35,7 @@ export interface SystemToolsInfo {
   scrcpy: ToolInfo;
   ffmpeg: ToolInfo;
   ffprobe?: ToolInfo;
+  obs?: ToolInfo;
 }
 
 interface ToolDefinition {
@@ -103,6 +104,20 @@ export class ToolDetectionService {
         versionArgs: ['-version'],
         versionRegex: /ffprobe version ([\S]+)/i,
       },
+      obs: {
+        displayName: 'OBS Studio',
+        binaryName: 'obs64.exe',
+        defaultPaths: [
+          path.join(programFiles, 'obs-studio', 'bin', '64bit', 'obs64.exe'),
+          path.join(programFilesX86, 'obs-studio', 'bin', '32bit', 'obs32.exe'),
+          path.join(programFiles, 'obs-studio', 'bin', '32bit', 'obs32.exe'),
+          path.join(programFilesX86, 'Steam', 'steamapps', 'common', 'OBS Studio', 'bin', '64bit', 'obs64.exe'),
+          path.join(programFiles, 'Steam', 'steamapps', 'common', 'OBS Studio', 'bin', '64bit', 'obs64.exe'),
+          path.join(localAppData, 'Programs', 'obs-studio', 'bin', '64bit', 'obs64.exe'),
+        ],
+        versionArgs: ['--version'],
+        versionRegex: /([\d.]+)/i,
+      },
     };
   }
 
@@ -148,6 +163,61 @@ export class ToolDetectionService {
     }
 
     // Execute with version argument to verify
+    if (tool === 'obs') {
+      return new Promise((resolve) => {
+        const escaped = exePath.replace(/'/g, "''");
+        execFile(
+          'powershell',
+          ['-NoProfile', '-Command', `((Get-Item '${escaped}').VersionInfo | Select-Object -Property ProductName, FileVersion, ProductVersion | ConvertTo-Json -Compress)`],
+          { timeout: 5000, windowsHide: true },
+          (error, stdout) => {
+            if (error) {
+              resolve({
+                name: def.displayName,
+                toolType: tool,
+                status: 'error',
+                path: exePath,
+                error: `OBS executable validation failed: ${error.message}`,
+              });
+              return;
+            }
+
+            try {
+              const info = JSON.parse(stdout.trim());
+              const prodName = String(info.ProductName || '');
+              const version = String(info.ProductVersion || info.FileVersion || '');
+              // Never report OBS installed without validating its executable
+              if (prodName.toLowerCase().includes('obs') || path.basename(exePath).toLowerCase().startsWith('obs')) {
+                resolve({
+                  name: def.displayName,
+                  toolType: tool,
+                  status: 'installed',
+                  path: exePath,
+                  version: version || 'Installed',
+                });
+                return;
+              }
+              resolve({
+                name: def.displayName,
+                toolType: tool,
+                status: 'error',
+                path: exePath,
+                error: `File is not a valid OBS Studio executable (Detected: ${prodName || 'Unknown'})`,
+              });
+            } catch {
+              resolve({
+                name: def.displayName,
+                toolType: tool,
+                status: 'error',
+                path: exePath,
+                error: 'Could not parse OBS Studio version information',
+              });
+            }
+          }
+        );
+      });
+    }
+
     return new Promise((resolve) => {
       try {
         execFile(
@@ -313,13 +383,14 @@ export class ToolDetectionService {
   }
 
   /**
-   * Detect all tools: ADB, scrcpy, FFmpeg, and ffprobe
+   * Detect all tools: ADB, scrcpy, FFmpeg, ffprobe, and OBS Studio
    */
   public async detectAll(paths: {
     adbPath?: string;
     scrcpyPath?: string;
     ffmpegPath?: string;
     ffprobePath?: string;
+    obsPath?: string;
   } = {}): Promise<SystemToolsInfo> {
     // If ffprobePath is empty but ffmpegPath is configured, check if ffprobe sits next to ffmpeg
     let effectiveFfprobePath = paths.ffprobePath;
@@ -330,13 +401,14 @@ export class ToolDetectionService {
       }
     }
 
-    const [adb, scrcpy, ffmpeg, ffprobe] = await Promise.all([
+    const [adb, scrcpy, ffmpeg, ffprobe, obs] = await Promise.all([
       this.detectTool('adb', paths.adbPath),
       this.detectTool('scrcpy', paths.scrcpyPath),
       this.detectTool('ffmpeg', paths.ffmpegPath),
       this.detectTool('ffprobe', effectiveFfprobePath),
+      this.detectTool('obs', paths.obsPath),
     ]);
 
-    return { adb, scrcpy, ffmpeg, ffprobe };
+    return { adb, scrcpy, ffmpeg, ffprobe, obs };
   }
 }

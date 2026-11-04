@@ -42,18 +42,21 @@ export default function AppSettingsPage() {
     scrcpy: { name: 'scrcpy', toolType: 'scrcpy' as const, status: 'missing' as const, error: 'Not checked' },
     ffmpeg: { name: 'FFmpeg', toolType: 'ffmpeg' as const, status: 'missing' as const, error: 'Not checked' },
     ffprobe: { name: 'ffprobe', toolType: 'ffprobe' as const, status: 'missing' as const, error: 'Not checked' },
+    obs: { name: 'OBS Studio', toolType: 'obs' as const, status: 'missing' as const, error: 'Not checked' },
   };
 
   const [adbPath, setAdbPath] = useState<string>(appSettings.adbPath || '');
   const [scrcpyPath, setScrcpyPath] = useState<string>(appSettings.scrcpyPath || '');
   const [ffmpegPath, setFfmpegPath] = useState<string>(appSettings.ffmpegPath || '');
   const [ffprobePath, setFfprobePath] = useState<string>(appSettings.ffprobePath || '');
+  const [obsPath, setObsPath] = useState<string>(appSettings.obsPath || '');
 
   const [validationResults, setValidationResults] = useState<Record<string, ToolInfo | null>>({
     adb: null,
     scrcpy: null,
     ffmpeg: null,
     ffprobe: null,
+    obs: null,
   });
 
   const [isValidating, setIsValidating] = useState<Record<string, boolean>>({
@@ -61,6 +64,7 @@ export default function AppSettingsPage() {
     scrcpy: false,
     ffmpeg: false,
     ffprobe: false,
+    obs: false,
   });
 
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -74,6 +78,7 @@ export default function AppSettingsPage() {
       setScrcpyPath(appSettings.scrcpyPath || '');
       setFfmpegPath(appSettings.ffmpegPath || '');
       setFfprobePath(appSettings.ffprobePath || '');
+      setObsPath(appSettings.obsPath || '');
     }
   }, [appSettings]);
 
@@ -91,7 +96,7 @@ export default function AppSettingsPage() {
     }
   };
 
-  const handleBrowse = async (tool: 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe') => {
+  const handleBrowse = async (tool: 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe' | 'obs') => {
     if (!window.electronAPI?.tools?.browse) return;
 
     try {
@@ -108,6 +113,7 @@ export default function AppSettingsPage() {
           }
         }
         if (tool === 'ffprobe') setFfprobePath(result.path);
+        if (tool === 'obs') setObsPath(result.path);
 
         setValidationResults((prev) => ({ ...prev, [tool]: result }));
       }
@@ -117,7 +123,7 @@ export default function AppSettingsPage() {
     }
   };
 
-  const handleTestPath = async (tool: 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe', inputPath: string) => {
+  const handleTestPath = async (tool: 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe' | 'obs', inputPath: string) => {
     if (!window.electronAPI?.tools?.validatePath) return;
 
     setIsValidating((prev) => ({ ...prev, [tool]: true }));
@@ -153,6 +159,7 @@ export default function AppSettingsPage() {
           scrcpyPath,
           ffmpegPath,
           ffprobePath,
+          obsPath,
         });
 
         if (response?.settings) {
@@ -165,6 +172,7 @@ export default function AppSettingsPage() {
             scrcpy: response.tools.scrcpy,
             ffmpeg: response.tools.ffmpeg,
             ffprobe: response.tools.ffprobe || null,
+            obs: response.tools.obs || null,
           });
         }
 
@@ -334,6 +342,20 @@ export default function AppSettingsPage() {
               isValidating={isValidating.ffprobe}
               validation={validationResults.ffprobe || toolStatus.ffprobe}
               placeholder="C:\ffmpeg\bin\ffprobe.exe"
+            />
+
+            {/* OBS Studio Path */}
+            <ToolPathField
+              name="OBS Studio (obs64.exe)"
+              tool="obs"
+              defaultHint="Default: C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+              value={obsPath}
+              onChange={setObsPath}
+              onBrowse={() => handleBrowse('obs')}
+              onTest={() => handleTestPath('obs', obsPath)}
+              isValidating={isValidating.obs}
+              validation={validationResults.obs || toolStatus.obs}
+              placeholder="C:\Program Files\obs-studio\bin\64bit\obs64.exe"
             />
           </div>
 

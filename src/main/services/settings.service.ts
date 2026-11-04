@@ -14,6 +14,11 @@ export interface StoredSettings {
   scrcpyPath: string;
   ffmpegPath: string;
   ffprobePath: string;
+  obsPath: string;
+  obsWebSocketUrl: string;
+  obsWebSocketPassword?: string;
+  youtubeStreamKey?: string;
+  audioSyncOffsetMs: number;
   theme: 'dark' | 'light' | 'system';
   startMinimized: boolean;
   autoConnect: boolean;
@@ -26,6 +31,11 @@ const defaultSettings: StoredSettings = {
   scrcpyPath: '',
   ffmpegPath: '',
   ffprobePath: '',
+  obsPath: '',
+  obsWebSocketUrl: 'ws://127.0.0.1:4455',
+  obsWebSocketPassword: '',
+  youtubeStreamKey: '',
+  audioSyncOffsetMs: 0,
   theme: 'dark',
   startMinimized: false,
   autoConnect: false,

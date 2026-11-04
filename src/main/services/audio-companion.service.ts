@@ -57,6 +57,21 @@ export interface AudioLevelMetrics {
   dB: number;   // -60 to 0 dB
 }
 
+export interface AudioSyncMetrics {
+  streamStartTime: number;
+  lastPacketTimestamp: number;
+  totalBytesReceived: number;
+  totalAudioDurationMs: number;
+  wallClockElapsedMs: number;
+  driftMs: number;
+  syncOffsetMs: number;
+  underrunCount: number;
+  clippingCount: number;
+  isClipping: boolean;
+  sampleRate: number;
+  channels: number;
+}
+
 export interface CompanionStats {
   bytesReceived: number;
   packetCount: number;
@@ -104,6 +119,15 @@ export class AudioCompanionService extends EventEmitter {
   private levelSamplePeak: number = 0;
   private levelSampleCount: number = 0;
   private lastLevelEmitTime: number = 0;
+
+  // Audio/Video synchronization & health metrics
+  private streamStartTime: number = 0;
+  private lastPacketTimestamp: number = 0;
+  private syncOffsetMs: number = 0;
+  private underrunCount: number = 0;
+  private clippingCount: number = 0;
+  private isClipping: boolean = false;
+  private lastClippingTime: number = 0;
 
   constructor() {
     super();
@@ -297,6 +321,11 @@ export class AudioCompanionService extends EventEmitter {
     this.currentPeak = 0;
     this.currentRms = 0;
     this.currentDb = -60;
+    this.streamStartTime = 0;
+    this.lastPacketTimestamp = 0;
+    this.underrunCount = 0;
+    this.clippingCount = 0;
+    this.isClipping = false;
     this.setStatus('starting');
 
     try {
@@ -457,6 +486,20 @@ export class AudioCompanionService extends EventEmitter {
    */
   private setupSocketHandlers(socket: net.Socket): void {
     socket.on('data', (chunk: Buffer) => {
+      const now = Date.now();
+      if (this.streamStartTime === 0) {
+        this.streamStartTime = now;
+      }
+
+      // Check for buffer underruns: gap between consecutive packets > 140ms
+      if (this.lastPacketTimestamp > 0 && now - this.lastPacketTimestamp > 140) {
+        this.underrunCount++;
+        console.warn(
+          `[AudioPipeline] Buffer underrun detected! Gap: ${now - this.lastPacketTimestamp}ms (Total underruns: ${this.underrunCount})`
+        );
+      }
+      this.lastPacketTimestamp = now;
+
       this.bytesReceived += chunk.length;
       this.packetCount++;
 
@@ -471,7 +514,7 @@ export class AudioCompanionService extends EventEmitter {
         }
       }
 
-      // Calculate real-time audio levels from 16-bit signed PCM
+      // Calculate real-time audio levels and clipping from 16-bit signed PCM
       this.computePcmLevels(chunk);
 
       this.emit('pcm-data', chunk);
@@ -496,19 +539,32 @@ export class AudioCompanionService extends EventEmitter {
   }
 
   /**
-   * Compute real-time audio levels (Peak, RMS, dB) from 16-bit signed PCM buffer
+   * Compute real-time audio levels (Peak, RMS, dB) and clipping from 16-bit signed PCM buffer
    * Emits throttled 'audio-level' event (~10 updates per second)
    */
   private computePcmLevels(chunk: Buffer): void {
+    let hasClipInChunk = false;
     for (let i = 0; i < chunk.length - 1; i += 2) {
       const sample = chunk.readInt16LE(i);
-      const absNorm = Math.abs(sample) / 32768.0;
+      const absSample = Math.abs(sample);
+      if (absSample >= 32760) {
+        hasClipInChunk = true;
+      }
+      const absNorm = absSample / 32768.0;
 
       if (absNorm > this.levelSamplePeak) {
         this.levelSamplePeak = absNorm;
       }
       this.levelSampleSumSquares += absNorm * absNorm;
       this.levelSampleCount++;
+    }
+
+    if (hasClipInChunk) {
+      this.clippingCount++;
+      this.isClipping = true;
+      this.lastClippingTime = Date.now();
+    } else if (Date.now() - this.lastClippingTime > 1500) {
+      this.isClipping = false;
     }
 
     const now = Date.now();
@@ -534,6 +590,62 @@ export class AudioCompanionService extends EventEmitter {
       this.levelSamplePeak = 0;
       this.levelSampleCount = 0;
       this.lastLevelEmitTime = now;
+    }
+  }
+
+  /**
+   * Get audio/video synchronization and pipeline health metrics
+   */
+  public getSyncMetrics(): AudioSyncMetrics {
+    const now = Date.now();
+    const wallClockElapsedMs = this.streamStartTime > 0 ? now - this.streamStartTime : 0;
+    // 48000 samples/sec * 2 channels * 2 bytes/sample = 192,000 bytes/sec = 192 bytes/ms
+    const totalAudioDurationMs = Math.round(this.bytesReceived / 192);
+    const driftMs = wallClockElapsedMs > 0 ? wallClockElapsedMs - totalAudioDurationMs : 0;
+
+    return {
+      streamStartTime: this.streamStartTime,
+      lastPacketTimestamp: this.lastPacketTimestamp,
+      totalBytesReceived: this.bytesReceived,
+      totalAudioDurationMs,
+      wallClockElapsedMs,
+      driftMs,
+      syncOffsetMs: this.syncOffsetMs,
+      underrunCount: this.underrunCount,
+      clippingCount: this.clippingCount,
+      isClipping: this.isClipping,
+      sampleRate: 48000,
+      channels: 2,
+    };
+  }
+
+  public setSyncOffset(offsetMs: number): void {
+    this.syncOffsetMs = offsetMs;
+    console.log(`[AudioCompanion] Audio sync offset updated: ${offsetMs}ms`);
+    this.emit('sync-offset-changed', offsetMs);
+  }
+
+  public getSyncOffset(): number {
+    return this.syncOffsetMs;
+  }
+
+  /**
+   * Recover cleanly on USB device disconnect
+   */
+  public handleDeviceDisconnected(deviceId: string): void {
+    if (this.activeDeviceId === deviceId) {
+      console.warn(`[AudioCompanion] Active device ${deviceId} disconnected from USB. Releasing audio forward socket...`);
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      if (this.tcpSocket) {
+        try {
+          this.tcpSocket.destroy();
+        } catch {}
+        this.tcpSocket = null;
+      }
+      this.setStatus('stopped');
     }
   }
 

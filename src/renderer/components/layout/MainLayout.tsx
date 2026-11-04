@@ -105,8 +105,10 @@ export default function MainLayout({ children }: MainLayoutProps) {
     }
     const player = pcmPlayerRef.current;
 
+    const effectiveMuted = isMuted || Boolean(state.streamingSettings?.mutePcAudioPlayback);
+
     if (isCapturing) {
-      player.setVolume(volume, isMuted);
+      player.setVolume(volume, effectiveMuted);
 
       if (window.electronAPI?.audioCompanion?.onPcmData) {
         window.electronAPI.audioCompanion.onPcmData((chunk: Uint8Array) => {
@@ -122,12 +124,13 @@ export default function MainLayout({ children }: MainLayoutProps) {
         player.stop();
       }
     };
-  }, [isCapturing]);
+  }, [isCapturing, isMuted, state.streamingSettings?.mutePcAudioPlayback]);
 
   // Sync volume & mute changes with Web Audio API
   useEffect(() => {
-    pcmPlayerRef.current?.setVolume(volume, isMuted);
-  }, [volume, isMuted]);
+    const effectiveMuted = isMuted || Boolean(state.streamingSettings?.mutePcAudioPlayback);
+    pcmPlayerRef.current?.setVolume(volume, effectiveMuted);
+  }, [volume, isMuted, state.streamingSettings?.mutePcAudioPlayback]);
 
   // Fallback HTML5 audio sink (only used if onPcmData is not present)
   useEffect(() => {
