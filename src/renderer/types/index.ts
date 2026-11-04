@@ -130,10 +130,55 @@ export type PageId =
   | 'dashboard'
   | 'devices'
   | 'mirroring'
+  | 'ipad'
   | 'audio'
   | 'video'
   | 'streaming'
   | 'settings';
+
+/** DirectShow & HDMI Capture Device Definitions */
+export interface CaptureDeviceCapability {
+  width: number;
+  height: number;
+  minFps: number;
+  maxFps: number;
+  pixelFormat?: string;
+}
+
+export interface CaptureDevice {
+  id: string;
+  name: string;
+  alternativeName?: string;
+  type: 'hdmi-capture' | 'webcam' | 'virtual';
+  status: 'connected' | 'in-use' | 'disconnected' | 'error';
+  supportedCapabilities: CaptureDeviceCapability[];
+  supportedResolutions: string[];
+  maxFps: number;
+  supports1080p60: boolean;
+  supports4K: boolean;
+  audioEndpointName?: string;
+  error?: string;
+}
+
+export interface AudioCaptureDevice {
+  id: string;
+  name: string;
+  alternativeName?: string;
+  type: 'hdmi-audio' | 'microphone' | 'virtual';
+  status: 'connected' | 'in-use' | 'disconnected';
+}
+
+export interface IpadCaptureSession {
+  deviceId: string;
+  deviceName: string;
+  audioDeviceId?: string;
+  audioDeviceName?: string;
+  status: 'idle' | 'starting' | 'active' | 'stopping' | 'error';
+  resolution?: string;
+  fps?: number;
+  startTime?: string;
+  error?: string;
+}
 
 /** Navigation item */
 export interface NavItem {
@@ -291,10 +336,20 @@ export interface ElectronAPI {
     stopStreaming: () => Promise<{ success: boolean; error?: string }>;
     getScenes: () => Promise<{ currentProgramSceneName: string; scenes: string[] }>;
     setupSources: (options: Record<string, any>) => Promise<{ success: boolean; message: string }>;
+    setupIpadSources?: (options: { sceneName?: string; videoDeviceName: string; audioDeviceName?: string }) => Promise<{ success: boolean; message: string }>;
     runTestRecording: (durationSeconds: number) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
     onStatusChanged: (callback: (data: ObsStatusInfo) => void) => void;
     onRecordStateChanged: (callback: (data: { active: boolean; state: string; outputPath?: string }) => void) => void;
     onStreamStateChanged: (callback: (data: { active: boolean; state: string }) => void) => void;
+  };
+  capture?: {
+    listDevices: () => Promise<{ videoDevices: CaptureDevice[]; audioDevices: AudioCaptureDevice[] }>;
+    startCapture: (deviceId: string, options?: Record<string, any>) => Promise<{ success: boolean; session?: IpadCaptureSession; error?: string }>;
+    stopCapture: (deviceId: string) => Promise<{ success: boolean; error?: string }>;
+    getSession: (deviceId: string) => Promise<IpadCaptureSession | null>;
+    onCaptureStarted?: (callback: (session: IpadCaptureSession) => void) => void;
+    onCaptureStopped?: (callback: (data: { deviceId: string }) => void) => void;
+    onCaptureError?: (callback: (data: { error: string }) => void) => void;
   };
   onDeviceConnected: (callback: (device: Device) => void) => void;
   onDeviceDisconnected: (callback: (deviceId: string) => void) => void;

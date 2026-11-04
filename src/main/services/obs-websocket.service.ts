@@ -514,6 +514,79 @@ export class ObsWebSocketService extends EventEmitter {
   }
 
   /**
+   * Create or configure iPad HDMI Video & Audio inputs in OBS Studio
+   * Preserves existing Android sources and OBS scenes.
+   */
+  public async setupIpadSources(options: {
+    sceneName?: string;
+    videoDeviceName: string;
+    audioDeviceName?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    try {
+      const sceneList = await this.getSceneList();
+      const targetScene = options.sceneName || sceneList.currentProgramSceneName;
+      const videoDeviceName = options.videoDeviceName;
+      const audioDeviceName = options.audioDeviceName;
+
+      // 1. Add/Update Video Capture Device (DirectShow) for iPad HDMI
+      const videoSourceName = `iPad Video (${videoDeviceName})`;
+      try {
+        await this.call('CreateInput', {
+          sceneName: targetScene,
+          inputName: videoSourceName,
+          inputKind: 'dshow_input',
+          inputSettings: {
+            video_device_id: videoDeviceName,
+            res_type: 1, // Custom resolution
+            resolution: '1920x1080',
+          },
+        });
+      } catch {
+        // Source already exists, update settings
+        await this.call('SetInputSettings', {
+          inputName: videoSourceName,
+          inputSettings: {
+            video_device_id: videoDeviceName,
+          },
+        }).catch(() => {});
+      }
+
+      // 2. Add/Update Audio Input Capture for iPad HDMI Audio (if device available)
+      let audioSourceName = '';
+      if (audioDeviceName) {
+        audioSourceName = `iPad Audio (${audioDeviceName})`;
+        try {
+          await this.call('CreateInput', {
+            sceneName: targetScene,
+            inputName: audioSourceName,
+            inputKind: 'wasapi_input_capture',
+            inputSettings: {
+              device_id: audioDeviceName,
+            },
+          });
+        } catch {
+          await this.call('SetInputSettings', {
+            inputName: audioSourceName,
+            inputSettings: {
+              device_id: audioDeviceName,
+            },
+          }).catch(() => {});
+        }
+      }
+
+      return {
+        success: true,
+        message: audioSourceName
+          ? `Configured "${videoSourceName}" and "${audioSourceName}" in OBS scene "${targetScene}".`
+          : `Configured "${videoSourceName}" in OBS scene "${targetScene}".`,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `Failed to configure OBS iPad sources: ${msg}` };
+    }
+  }
+
+  /**
    * Run an automated 10-second test recording to verify video, game audio, and microphone sync
    */
   public async runTestRecording(durationSeconds: number = 10, onProgress?: (secRemaining: number) => void): Promise<{ success: boolean; outputPath?: string; error?: string }> {

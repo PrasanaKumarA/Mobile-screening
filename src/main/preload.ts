@@ -93,6 +93,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getScenes: () => ipcRenderer.invoke('obs:getScenes'),
     setupSources: (options: Record<string, any>) =>
       ipcRenderer.invoke('obs:setupSources', options),
+    setupIpadSources: (options: { sceneName?: string; videoDeviceName: string; audioDeviceName?: string }) =>
+      ipcRenderer.invoke('obs:setupIpadSources', options),
     runTestRecording: (durationSeconds: number) =>
       ipcRenderer.invoke('obs:runTestRecording', durationSeconds),
     onStatusChanged: (callback: (data: any) => void) => {
@@ -103,6 +105,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     onStreamStateChanged: (callback: (data: any) => void) => {
       ipcRenderer.on('obs:streamStateChanged', (_event, data) => callback(data));
+    },
+  },
+
+  // iPad HDMI Video & Audio Capture
+  capture: {
+    listDevices: () => ipcRenderer.invoke('capture:listDevices'),
+    startCapture: (deviceId: string, options?: Record<string, any>) =>
+      ipcRenderer.invoke('capture:start', deviceId, options),
+    stopCapture: (deviceId: string) =>
+      ipcRenderer.invoke('capture:stop', deviceId),
+    getSession: (deviceId: string) =>
+      ipcRenderer.invoke('capture:getSession', deviceId),
+    onCaptureStarted: (callback: (session: any) => void) => {
+      ipcRenderer.on('capture:started', (_event, data) => callback(data));
+    },
+    onCaptureStopped: (callback: (data: any) => void) => {
+      ipcRenderer.on('capture:stopped', (_event, data) => callback(data));
+    },
+    onCaptureError: (callback: (data: any) => void) => {
+      ipcRenderer.on('capture:error', (_event, data) => callback(data));
     },
   },
 

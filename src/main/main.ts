@@ -182,6 +182,19 @@ function createWindow(): void {
   obsWebSocketService.on('stream-state-changed', (data) => {
     mainWindow?.webContents.send('obs:streamStateChanged', data);
   });
+
+  // Forward Capture service events to renderer
+  captureService.on('capture:started', (session) => {
+    mainWindow?.webContents.send('capture:started', session);
+  });
+
+  captureService.on('capture:stopped', (data) => {
+    mainWindow?.webContents.send('capture:stopped', data);
+  });
+
+  captureService.on('capture:error', (data) => {
+    mainWindow?.webContents.send('capture:error', data);
+  });
 }
 
 // Window control IPC handlers
@@ -466,8 +479,32 @@ ipcMain.handle('obs:setupSources', async (_event, options: Record<string, any>) 
   });
 });
 
+ipcMain.handle('obs:setupIpadSources', async (_event, options: { sceneName?: string; videoDeviceName: string; audioDeviceName?: string }) => {
+  return obsWebSocketService.setupIpadSources(options);
+});
+
 ipcMain.handle('obs:runTestRecording', async (_event, durationSeconds: number = 10) => {
   return obsWebSocketService.runTestRecording(durationSeconds);
+});
+
+// ============================================================
+// iPad HDMI Capture Card IPC Handlers
+// ============================================================
+
+ipcMain.handle('capture:listDevices', async () => {
+  return captureService.listCaptureDevices();
+});
+
+ipcMain.handle('capture:start', async (_event, deviceId: string, options: any) => {
+  return captureService.startCapture(deviceId, options);
+});
+
+ipcMain.handle('capture:stop', async (_event, deviceId: string) => {
+  return captureService.stopCapture(deviceId);
+});
+
+ipcMain.handle('capture:getSession', async (_event, deviceId: string) => {
+  return captureService.getSession(deviceId);
 });
 
 app.whenReady().then(async () => {

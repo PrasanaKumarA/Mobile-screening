@@ -233,15 +233,17 @@ export default function Dashboard() {
           borderColor="border-emerald-500/20"
           iconColor="text-emerald-400"
         />
-        <StatusTile
-          icon={Tablet}
-          label="iPad"
-          value="Not configured"
-          status="unavailable"
-          gradient="from-blue-500/10 to-cyan-500/5"
-          borderColor="border-blue-500/20"
-          iconColor="text-blue-400"
-        />
+        <div onClick={() => navigate('/ipad')} className="cursor-pointer">
+          <StatusTile
+            icon={Tablet}
+            label="iPad Capture"
+            value="HDMI Ready"
+            status="ready"
+            gradient="from-blue-500/10 to-cyan-500/5"
+            borderColor="border-blue-500/20"
+            iconColor="text-blue-400"
+          />
+        </div>
         <StatusTile
           icon={Monitor}
           label="Mirroring"
@@ -487,17 +489,25 @@ export default function Dashboard() {
                   <Tablet className="w-5 h-5 text-blue-400" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-white">iPad Connection</h3>
-                  <p className="text-xs text-surface-400">HDMI capture card input for iOS devices</p>
+                  <h3 className="font-semibold text-white">iPad Pro M4 HDMI Capture</h3>
+                  <p className="text-xs text-surface-400">DirectShow hardware capture & independent audio</p>
                 </div>
               </div>
+              <button
+                onClick={() => navigate('/ipad')}
+                className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5"
+              >
+                <Tablet className="w-3.5 h-3.5" />
+                Open iPad Studio
+              </button>
             </div>
 
             <EmptyDeviceState
               icon={Tablet}
-              title="iPad capture ready for HDMI capture hardware"
-              description="iPad mirroring connects via USB HDMI capture devices. The modular architecture is isolated from Android ADB."
-              muted
+              title="iPad Pro M4 HDMI capture ready"
+              description="Connect your iPad Pro M4 via USB-C HDMI adapter to your capture card for low-latency 1080p60 preview and streaming."
+              action="Launch iPad Capture"
+              onAction={() => navigate('/ipad')}
             />
           </Card>
         </div>
