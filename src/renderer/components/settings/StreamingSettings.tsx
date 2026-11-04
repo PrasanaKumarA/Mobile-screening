@@ -520,7 +520,10 @@ export default function StreamingSettingsPage() {
                 1. OBS Studio Installation & Detection
               </h3>
             </div>
-            <StatusBadge status={effectiveObs.status} text={effectiveObs.status === 'installed' ? `v${effectiveObs.version || 'OK'}` : undefined} />
+            <StatusBadge
+              status={effectiveObs.status}
+              label={effectiveObs.status === 'installed' ? `v${effectiveObs.version || 'OK'}` : undefined}
+            />
           </div>
 
           <p className="text-xs text-surface-400 mb-4">
@@ -932,7 +935,7 @@ export default function StreamingSettingsPage() {
             </div>
             <StatusBadge
               status={isMirroring ? 'installed' : 'missing'}
-              text={isMirroring ? 'MIRROR ACTIVE' : 'MIRROR IDLE'}
+              label={isMirroring ? 'MIRROR ACTIVE' : 'MIRROR IDLE'}
             />
           </div>
 

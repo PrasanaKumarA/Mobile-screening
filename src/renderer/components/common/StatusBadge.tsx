@@ -4,6 +4,7 @@ import type { DeviceStatus } from '../../types';
 interface StatusBadgeProps {
   status: DeviceStatus | 'active' | 'idle' | 'ready' | 'unavailable' | 'installed' | 'missing' | 'error';
   label?: string;
+  text?: string;
   size?: 'sm' | 'md';
   pulse?: boolean;
 }
@@ -22,9 +23,9 @@ const statusConfig: Record<string, { color: string; bg: string; dot: string }> =
   unavailable: { color: 'text-surface-500', bg: 'bg-surface-500/10 border-surface-600/20', dot: 'bg-surface-600' },
 };
 
-export default function StatusBadge({ status, label, size = 'sm', pulse = false }: StatusBadgeProps) {
+export default function StatusBadge({ status, label, text, size = 'sm', pulse = false }: StatusBadgeProps) {
   const config = statusConfig[status] || statusConfig.disconnected;
-  const displayLabel = label || status.charAt(0).toUpperCase() + status.slice(1);
+  const displayLabel = label || text || status.charAt(0).toUpperCase() + status.slice(1);
 
   return (
     <span

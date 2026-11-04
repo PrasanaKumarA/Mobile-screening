@@ -304,14 +304,6 @@ export interface ElectronAPI {
   onMirroringError: (callback: (data: { deviceId: string; error: string }) => void) => void;
   onMirroringAudioError: (callback: (data: { deviceId: string; error: string }) => void) => void;
 }
-  onDeviceConnected: (callback: (device: Device) => void) => void;
-  onDeviceDisconnected: (callback: (deviceId: string) => void) => void;
-  onDeviceUnauthorized: (callback: (device: { id: string; name: string }) => void) => void;
-  onMirroringStarted: (callback: (session: any) => void) => void;
-  onMirroringStopped: (callback: (data: { deviceId: string; code?: number }) => void) => void;
-  onMirroringError: (callback: (data: { deviceId: string; error: string }) => void) => void;
-  onMirroringAudioError: (callback: (data: { deviceId: string; error: string }) => void) => void;
-}
 
 declare global {
   interface Window {
