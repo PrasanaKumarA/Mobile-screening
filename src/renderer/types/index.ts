@@ -56,6 +56,30 @@ export interface Device {
   ipAddress?: string;
 }
 
+export interface LiveScrcpyMetrics {
+  currentFps: number;
+  skippedFrames: number;
+  renderer: string;
+  textureWidth: number;
+  textureHeight: number;
+}
+
+export interface DeviceDiagnostics {
+  phoneModel: string;
+  androidVersion: string;
+  chipset: string;
+  displayRefreshRate: number;
+  displayMode: string;
+  bgmiProcess: string;
+  bgmiCpuUsage: string;
+  skinTemperature: number;
+  batteryTemperature: number;
+  thermalStatus: number;
+  usbConnection: string;
+  hardwareEncoder: string;
+  hardwareDecoder: string;
+}
+
 /** Active mirror session info */
 export interface MirrorSessionInfo {
   deviceId: string;
@@ -65,6 +89,7 @@ export interface MirrorSessionInfo {
   audioEnabled?: boolean;
   audioStatus?: 'forwarding' | 'disabled' | 'error';
   audioError?: string;
+  liveMetrics?: LiveScrcpyMetrics;
 }
 
 /** A past connection record */
@@ -334,6 +359,7 @@ export interface ElectronAPI {
     connectWireless: (ip: string, port: number) => Promise<boolean>;
     disconnect: (deviceId: string) => Promise<void>;
     restartServer: () => Promise<boolean>;
+    getDeviceDiagnostics?: (deviceId: string) => Promise<DeviceDiagnostics>;
   };
   scrcpy: {
     startMirroring: (
@@ -343,6 +369,7 @@ export interface ElectronAPI {
     stopMirroring: (deviceId: string) => Promise<{ success: boolean; error?: string }>;
     getSession: (deviceId: string) => Promise<MirrorSessionInfo | null>;
     getAllSessions: () => Promise<Record<string, MirrorSessionInfo>>;
+    onFpsUpdate?: (callback: (data: { deviceId: string; currentFps: number; skippedFrames: number }) => void) => void;
   };
   audioCompanion: {
     getStatus: () => Promise<CompanionAudioStatusResponse>;

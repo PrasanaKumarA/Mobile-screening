@@ -4,16 +4,18 @@ import Sidebar from './Sidebar';
 import TitleBar from './TitleBar';
 import { useAppContext } from '../../context/AppContext';
 
-// Web Audio API Low-Latency Adaptive Jitter-Buffered PCM Stream Engine
+// Web Audio API Ultra-Low-Latency Bounded Adaptive Jitter-Buffered PCM Stream Engine
 class PcmPlayer {
   private audioCtx: AudioContext | null = null;
   private gainNode: GainNode | null = null;
   private nextPlayTime: number = 0;
-  private targetBufferLatencySec: number = 0.020; // Default 20 ms
+  private targetBufferLatencySec: number = 0.010; // 10 ms ultra-low latency for USB 3.0
+  private dynamicLeadSec: number = 0.010; // Adaptive jitter lead cushion
   private syncOffsetSec: number = 0; // Configurable user offset
-  private maxAllowedLeadTimeSec: number = 0.065; // Max 65 ms buffer before overrun correction
+  private maxAllowedLeadTimeSec: number = 0.028; // Max 28 ms strictly bounded queue
   private underrunCount: number = 0;
   private overrunCount: number = 0;
+  private smoothPacketCount: number = 0;
   private baseCaptureTimeMs: number = 0;
   private baseAudioContextTime: number = 0;
 
@@ -40,7 +42,8 @@ class PcmPlayer {
 
   public setTargetBufferLatency(targetMs: number) {
     this.targetBufferLatencySec = Math.max(0.005, Math.min(0.200, targetMs / 1000));
-    this.maxAllowedLeadTimeSec = Math.max(0.040, this.targetBufferLatencySec * 3);
+    this.dynamicLeadSec = this.targetBufferLatencySec;
+    this.maxAllowedLeadTimeSec = Math.max(0.025, this.targetBufferLatencySec * 2.8);
   }
 
   public setSyncOffset(offsetMs: number) {
@@ -66,6 +69,18 @@ class PcmPlayer {
     const numSamples = int16.length / 2;
     if (numSamples <= 0) return;
 
+    const currentTime = this.audioCtx.currentTime;
+
+    // 0. Discard stale/expired packets arriving heavily late to prevent pileup
+    if (captureTimeMs && this.baseCaptureTimeMs > 0) {
+      const captureDeltaSec = (captureTimeMs - this.baseCaptureTimeMs) / 1000;
+      const targetTime = this.baseAudioContextTime + captureDeltaSec;
+      if (targetTime < currentTime - 0.040) {
+        // Discard severely lagged chunk
+        return;
+      }
+    }
+
     const audioBuffer = this.audioCtx.createBuffer(2, numSamples, 48000);
     const left = audioBuffer.getChannelData(0);
     const right = audioBuffer.getChannelData(1);
@@ -79,13 +94,16 @@ class PcmPlayer {
     source.buffer = audioBuffer;
     source.connect(this.gainNode);
 
-    const currentTime = this.audioCtx.currentTime;
-    const targetLeadTime = Math.max(0.005, this.targetBufferLatencySec + this.syncOffsetSec);
+    const effectiveLeadTime = Math.max(0.005, this.dynamicLeadSec + this.syncOffsetSec);
 
     // 1. Detect underrun: playback queue ran dry
     if (this.nextPlayTime < currentTime) {
       this.underrunCount++;
-      this.nextPlayTime = currentTime + targetLeadTime;
+      this.smoothPacketCount = 0;
+      // Adaptively cushion target lead by +3ms (up to 24ms) to absorb jitter burst
+      this.dynamicLeadSec = Math.min(0.024, this.dynamicLeadSec + 0.003);
+      const adaptedLead = Math.max(0.005, this.dynamicLeadSec + this.syncOffsetSec);
+      this.nextPlayTime = currentTime + adaptedLead;
       if (captureTimeMs) {
         this.baseCaptureTimeMs = captureTimeMs;
         this.baseAudioContextTime = this.nextPlayTime;
@@ -95,24 +113,33 @@ class PcmPlayer {
     else if (this.nextPlayTime > currentTime + this.maxAllowedLeadTimeSec) {
       this.overrunCount++;
       // Smoothly re-anchor queue to target lead time, shedding accumulated delay
-      this.nextPlayTime = currentTime + targetLeadTime;
+      this.nextPlayTime = currentTime + effectiveLeadTime;
       if (captureTimeMs) {
         this.baseCaptureTimeMs = captureTimeMs;
         this.baseAudioContextTime = this.nextPlayTime;
       }
     }
-    // 3. Capture-timestamp based clock synchronization
-    else if (captureTimeMs) {
-      if (this.baseCaptureTimeMs === 0) {
-        this.baseCaptureTimeMs = captureTimeMs;
-        this.baseAudioContextTime = this.nextPlayTime;
-      } else {
-        const captureDeltaSec = (captureTimeMs - this.baseCaptureTimeMs) / 1000;
-        const targetTime = this.baseAudioContextTime + captureDeltaSec;
-        // If scheduled time drifts by > 30ms from hardware capture clock, gently nudge it back
-        const drift = targetTime - this.nextPlayTime;
-        if (Math.abs(drift) > 0.030) {
-          this.nextPlayTime += drift * 0.1; // 10% gradual correction to prevent clicks
+    // 3. Normal packet arrival: smooth relaxation back to baseline
+    else {
+      this.smoothPacketCount++;
+      if (this.smoothPacketCount > 300 && this.dynamicLeadSec > this.targetBufferLatencySec) {
+        this.dynamicLeadSec = Math.max(this.targetBufferLatencySec, this.dynamicLeadSec - 0.001);
+        this.smoothPacketCount = 0;
+      }
+
+      // Capture-timestamp based clock synchronization
+      if (captureTimeMs) {
+        if (this.baseCaptureTimeMs === 0) {
+          this.baseCaptureTimeMs = captureTimeMs;
+          this.baseAudioContextTime = this.nextPlayTime;
+        } else {
+          const captureDeltaSec = (captureTimeMs - this.baseCaptureTimeMs) / 1000;
+          const targetTime = this.baseAudioContextTime + captureDeltaSec;
+          const drift = targetTime - this.nextPlayTime;
+          // If scheduled time drifts by > 15ms from hardware capture clock, gently nudge it back
+          if (Math.abs(drift) > 0.015) {
+            this.nextPlayTime += drift * 0.05; // 5% soft correction
+          }
         }
       }
     }

@@ -31,6 +31,14 @@ export interface ScrcpyOptions {
   alwaysOnTop?: boolean;
 }
 
+export interface LiveScrcpyMetrics {
+  currentFps: number;
+  skippedFrames: number;
+  renderer: string;
+  textureWidth: number;
+  textureHeight: number;
+}
+
 export interface ActiveSession {
   deviceId: string;
   process: ChildProcess;
@@ -42,6 +50,7 @@ export interface ActiveSession {
   audioStatus?: 'forwarding' | 'disabled' | 'error';
   audioError?: string;
   lastError?: string;
+  liveMetrics?: LiveScrcpyMetrics;
 }
 
 export class ScrcpyService extends EventEmitter {
@@ -132,13 +141,47 @@ export class ScrcpyService extends EventEmitter {
 
       this.sessions.set(deviceId, session);
 
+      const parseScrcpyOutput = (text: string) => {
+        const fpsMatch = text.match(/INFO:\s+(\d+)\s+fps(?:\s+\(\+(\d+)\s+frames\s+skipped\))?/);
+        if (fpsMatch) {
+          const currentFps = parseInt(fpsMatch[1], 10);
+          const skipped = fpsMatch[2] ? parseInt(fpsMatch[2], 10) : 0;
+          if (!session.liveMetrics) {
+            session.liveMetrics = { currentFps: 0, skippedFrames: 0, renderer: 'direct3d11', textureWidth: 1920, textureHeight: 864 };
+          }
+          session.liveMetrics.currentFps = currentFps;
+          session.liveMetrics.skippedFrames += skipped;
+          this.emit('fps', { deviceId, currentFps, skippedFrames: session.liveMetrics.skippedFrames });
+        }
+
+        const texMatch = text.match(/INFO:\s+Texture:\s+(\d+)x(\d+)/);
+        if (texMatch) {
+          if (!session.liveMetrics) {
+            session.liveMetrics = { currentFps: 0, skippedFrames: 0, renderer: 'direct3d11', textureWidth: 0, textureHeight: 0 };
+          }
+          session.liveMetrics.textureWidth = parseInt(texMatch[1], 10);
+          session.liveMetrics.textureHeight = parseInt(texMatch[2], 10);
+        }
+
+        const renMatch = text.match(/INFO:\s+Renderer:\s+(\w+)/);
+        if (renMatch) {
+          if (!session.liveMetrics) {
+            session.liveMetrics = { currentFps: 0, skippedFrames: 0, renderer: renMatch[1], textureWidth: 0, textureHeight: 0 };
+          } else {
+            session.liveMetrics.renderer = renMatch[1];
+          }
+        }
+      };
+
       proc.stdout?.on('data', (data: Buffer) => {
         const text = data.toString();
+        parseScrcpyOutput(text);
         this.emit('log', { deviceId, level: 'info', message: text });
       });
 
       proc.stderr?.on('data', (data: Buffer) => {
         const text = data.toString();
+        parseScrcpyOutput(text);
         startupStderr += text;
         this.emit('log', { deviceId, level: 'error', message: text });
 
@@ -271,6 +314,7 @@ export class ScrcpyService extends EventEmitter {
     audioEnabled: boolean;
     audioStatus: 'forwarding' | 'disabled' | 'error';
     audioError?: string;
+    liveMetrics?: LiveScrcpyMetrics;
   } | null {
     const session = this.sessions.get(deviceId);
     if (!session) return null;
@@ -283,6 +327,7 @@ export class ScrcpyService extends EventEmitter {
       audioEnabled: session.audioEnabled ?? !session.options.noAudio,
       audioStatus: session.audioStatus || (!session.options.noAudio ? 'forwarding' : 'disabled'),
       audioError: session.audioError,
+      liveMetrics: session.liveMetrics,
     };
   }
 
@@ -299,6 +344,7 @@ export class ScrcpyService extends EventEmitter {
       audioEnabled: boolean;
       audioStatus: 'forwarding' | 'disabled' | 'error';
       audioError?: string;
+      liveMetrics?: LiveScrcpyMetrics;
     }
   > {
     const result: Record<string, any> = {};
@@ -311,6 +357,7 @@ export class ScrcpyService extends EventEmitter {
         audioEnabled: session.audioEnabled ?? !session.options.noAudio,
         audioStatus: session.audioStatus || (!session.options.noAudio ? 'forwarding' : 'disabled'),
         audioError: session.audioError,
+        liveMetrics: session.liveMetrics,
       };
     }
     return result;
@@ -322,20 +369,25 @@ export class ScrcpyService extends EventEmitter {
   private buildArgs(deviceId: string, options: ScrcpyOptions): string[] {
     const args: string[] = ['--serial', deviceId];
 
-    // Video constraints (defaults: 1920 max size, 60 fps, 16M bitrate, H.264)
+    // Video constraints (defaults: 1920 max size, 120 fps max, 24M bitrate, H.264)
     const maxSize = options.maxSize !== undefined ? options.maxSize : 1920;
     if (maxSize > 0) {
       args.push(`--max-size=${maxSize}`);
     }
 
-    const maxFps = options.maxFps !== undefined ? options.maxFps : 60;
-    args.push(`--max-fps=${maxFps}`);
+    const maxFps = options.maxFps !== undefined ? options.maxFps : 120;
+    if (maxFps > 0) {
+      args.push(`--max-fps=${maxFps}`);
+    }
 
-    const bitRate = options.bitRate || '16M';
+    const bitRate = options.bitRate || '24M';
     args.push(`--video-bit-rate=${bitRate}`);
 
     const videoCodec = options.videoCodec || 'h264';
     args.push(`--video-codec=${videoCodec}`);
+
+    // Print real-time FPS to stderr for live diagnostics dashboard
+    args.push('--print-fps');
 
     // Audio Forwarding
     if (options.noAudio) {

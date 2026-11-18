@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     disconnect: (deviceId: string) =>
       ipcRenderer.invoke('adb:disconnect', deviceId),
     restartServer: () => ipcRenderer.invoke('adb:restartServer'),
+    getDeviceDiagnostics: (deviceId: string) =>
+      ipcRenderer.invoke('adb:getDeviceDiagnostics', deviceId),
   },
 
   // Scrcpy process control
@@ -41,6 +43,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSession: (deviceId: string) =>
       ipcRenderer.invoke('scrcpy:getSession', deviceId),
     getAllSessions: () => ipcRenderer.invoke('scrcpy:getAllSessions'),
+    onFpsUpdate: (callback: (data: { deviceId: string; currentFps: number; skippedFrames: number }) => void) => {
+      ipcRenderer.on('scrcpy:fps', (_event, data) => callback(data));
+    },
   },
 
   // Android Universal Audio Companion

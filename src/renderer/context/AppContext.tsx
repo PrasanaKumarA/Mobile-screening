@@ -68,8 +68,8 @@ const initialState: AppState = {
   },
   videoSettings: {
     resolution: '1920',
-    maxFps: 60,
-    bitRate: '16M',
+    maxFps: 120,
+    bitRate: '24M',
     codec: 'h264',
     orientation: 'auto',
   },

@@ -158,6 +158,10 @@ function createWindow(): void {
     mainWindow?.webContents.send('scrcpy:audioError', data);
   });
 
+  scrcpyService.on('fps', (data) => {
+    mainWindow?.webContents.send('scrcpy:fps', data);
+  });
+
   audioCompanionService.on('status-changed', (data) => {
     mainWindow?.webContents.send('audioCompanion:statusChanged', data);
   });
@@ -357,6 +361,10 @@ ipcMain.handle('adb:disconnect', async (_event, deviceId: string) => {
 
 ipcMain.handle('adb:restartServer', async () => {
   return adbService.restartServer();
+});
+
+ipcMain.handle('adb:getDeviceDiagnostics', async (_event, deviceId: string) => {
+  return adbService.getDeviceDiagnostics(deviceId);
 });
 
 // Scrcpy process control
