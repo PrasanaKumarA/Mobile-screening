@@ -487,7 +487,7 @@ function ToolPathField({
   placeholder,
 }: {
   name: string;
-  tool: 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe';
+  tool: 'adb' | 'scrcpy' | 'ffmpeg' | 'ffprobe' | 'obs';
   defaultHint: string;
   value: string;
   onChange: (val: string) => void;
