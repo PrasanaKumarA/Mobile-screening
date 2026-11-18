@@ -4,17 +4,27 @@ import Sidebar from './Sidebar';
 import TitleBar from './TitleBar';
 import { useAppContext } from '../../context/AppContext';
 
-// Web Audio API Low-Latency PCM Stream Engine
+// Web Audio API Low-Latency Adaptive Jitter-Buffered PCM Stream Engine
 class PcmPlayer {
   private audioCtx: AudioContext | null = null;
   private gainNode: GainNode | null = null;
   private nextPlayTime: number = 0;
+  private targetBufferLatencySec: number = 0.020; // Default 20 ms
+  private syncOffsetSec: number = 0; // Configurable user offset
+  private maxAllowedLeadTimeSec: number = 0.065; // Max 65 ms buffer before overrun correction
+  private underrunCount: number = 0;
+  private overrunCount: number = 0;
+  private baseCaptureTimeMs: number = 0;
+  private baseAudioContextTime: number = 0;
 
   private init(): boolean {
     try {
       if (!this.audioCtx) {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        this.audioCtx = new AudioContextClass({ sampleRate: 48000 });
+        this.audioCtx = new AudioContextClass({
+          sampleRate: 48000,
+          latencyHint: 'interactive',
+        });
         this.gainNode = this.audioCtx.createGain();
         this.gainNode.connect(this.audioCtx.destination);
       }
@@ -28,6 +38,15 @@ class PcmPlayer {
     }
   }
 
+  public setTargetBufferLatency(targetMs: number) {
+    this.targetBufferLatencySec = Math.max(0.005, Math.min(0.200, targetMs / 1000));
+    this.maxAllowedLeadTimeSec = Math.max(0.040, this.targetBufferLatencySec * 3);
+  }
+
+  public setSyncOffset(offsetMs: number) {
+    this.syncOffsetSec = offsetMs / 1000;
+  }
+
   public setVolume(volPercent: number, isMuted: boolean) {
     if (!this.audioCtx || !this.gainNode) return;
     const gain = isMuted ? 0 : Math.max(0, Math.min(1, volPercent / 100));
@@ -36,7 +55,7 @@ class PcmPlayer {
     } catch {}
   }
 
-  public feed(chunk: Uint8Array) {
+  public feed(chunk: Uint8Array, captureTimeMs?: number) {
     if (!this.init() || !this.audioCtx || !this.gainNode) return;
 
     // Ensure 4-byte alignment (16-bit signed stereo = 2 bytes * 2 channels = 4 bytes per sample)
@@ -61,17 +80,64 @@ class PcmPlayer {
     source.connect(this.gainNode);
 
     const currentTime = this.audioCtx.currentTime;
+    const targetLeadTime = Math.max(0.005, this.targetBufferLatencySec + this.syncOffsetSec);
+
+    // 1. Detect underrun: playback queue ran dry
     if (this.nextPlayTime < currentTime) {
-      // 20ms lead time to prevent underruns
-      this.nextPlayTime = currentTime + 0.02;
+      this.underrunCount++;
+      this.nextPlayTime = currentTime + targetLeadTime;
+      if (captureTimeMs) {
+        this.baseCaptureTimeMs = captureTimeMs;
+        this.baseAudioContextTime = this.nextPlayTime;
+      }
+    }
+    // 2. Detect overrun: audio scheduled too far into the future (prevent accumulating latency!)
+    else if (this.nextPlayTime > currentTime + this.maxAllowedLeadTimeSec) {
+      this.overrunCount++;
+      // Smoothly re-anchor queue to target lead time, shedding accumulated delay
+      this.nextPlayTime = currentTime + targetLeadTime;
+      if (captureTimeMs) {
+        this.baseCaptureTimeMs = captureTimeMs;
+        this.baseAudioContextTime = this.nextPlayTime;
+      }
+    }
+    // 3. Capture-timestamp based clock synchronization
+    else if (captureTimeMs) {
+      if (this.baseCaptureTimeMs === 0) {
+        this.baseCaptureTimeMs = captureTimeMs;
+        this.baseAudioContextTime = this.nextPlayTime;
+      } else {
+        const captureDeltaSec = (captureTimeMs - this.baseCaptureTimeMs) / 1000;
+        const targetTime = this.baseAudioContextTime + captureDeltaSec;
+        // If scheduled time drifts by > 30ms from hardware capture clock, gently nudge it back
+        const drift = targetTime - this.nextPlayTime;
+        if (Math.abs(drift) > 0.030) {
+          this.nextPlayTime += drift * 0.1; // 10% gradual correction to prevent clicks
+        }
+      }
     }
 
     source.start(this.nextPlayTime);
     this.nextPlayTime += audioBuffer.duration;
   }
 
+  public getBufferDurationMs(): number {
+    if (!this.audioCtx) return 0;
+    return Math.max(0, Math.round((this.nextPlayTime - this.audioCtx.currentTime) * 1000));
+  }
+
+  public getUnderrunCount(): number {
+    return this.underrunCount;
+  }
+
+  public getOverrunCount(): number {
+    return this.overrunCount;
+  }
+
   public stop() {
     this.nextPlayTime = 0;
+    this.baseCaptureTimeMs = 0;
+    this.baseAudioContextTime = 0;
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
       try {
         this.audioCtx.close().catch(() => {});
@@ -109,8 +175,13 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
     if (isCapturing) {
       player.setVolume(volume, effectiveMuted);
+      player.setSyncOffset(state.streamingSettings?.audioSyncOffsetMs || 0);
 
-      if (window.electronAPI?.audioCompanion?.onPcmData) {
+      if (window.electronAPI?.audioCompanion?.onPcmChunk) {
+        window.electronAPI.audioCompanion.onPcmChunk((payload: any) => {
+          player.feed(payload.pcm, payload.captureTimeMs);
+        });
+      } else if (window.electronAPI?.audioCompanion?.onPcmData) {
         window.electronAPI.audioCompanion.onPcmData((chunk: Uint8Array) => {
           player.feed(chunk);
         });
@@ -126,11 +197,12 @@ export default function MainLayout({ children }: MainLayoutProps) {
     };
   }, [isCapturing, isMuted, state.streamingSettings?.mutePcAudioPlayback]);
 
-  // Sync volume & mute changes with Web Audio API
+  // Sync volume, mute, and audio sync offset with Web Audio API
   useEffect(() => {
     const effectiveMuted = isMuted || Boolean(state.streamingSettings?.mutePcAudioPlayback);
     pcmPlayerRef.current?.setVolume(volume, effectiveMuted);
-  }, [volume, isMuted, state.streamingSettings?.mutePcAudioPlayback]);
+    pcmPlayerRef.current?.setSyncOffset(state.streamingSettings?.audioSyncOffsetMs || 0);
+  }, [volume, isMuted, state.streamingSettings?.mutePcAudioPlayback, state.streamingSettings?.audioSyncOffsetMs]);
 
   // Fallback HTML5 audio sink (only used if onPcmData is not present)
   useEffect(() => {

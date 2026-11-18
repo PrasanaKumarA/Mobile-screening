@@ -21,6 +21,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -131,32 +133,66 @@ class AudioCaptureService : Service() {
                     AudioFormat.CHANNEL_IN_STEREO,
                     AudioFormat.ENCODING_PCM_16BIT
                 )
-                val bufferSize = max(minBufferSize, BUFFER_SIZE)
+                // Hardware buffer accommodates at least minBufferSize, minimum 4x 20ms frames to prevent internal driver starvation
+                val hardwareBufferSize = max(minBufferSize, FRAME_SIZE_20MS * 4)
 
                 audioRecord = AudioRecord.Builder()
                     .setAudioPlaybackCaptureConfig(config)
                     .setAudioFormat(audioFormat)
-                    .setBufferSizeInBytes(bufferSize)
+                    .setBufferSizeInBytes(hardwareBufferSize)
                     .build()
 
                 audioRecord?.startRecording()
                 isRecording = true
-                Log.i(TAG, "AudioRecord started at 48 kHz stereo 16-bit PCM")
+                Log.i(TAG, "AudioRecord started at 48 kHz stereo 16-bit PCM. Target frame: ${FRAME_SIZE_20MS}B (20ms)")
 
-                val buffer = ByteArray(bufferSize)
+                // Read in optimized 20ms audio frames (960 sample frames = 3840 bytes) for minimal latency
+                val chunkBuffer = ByteArray(FRAME_SIZE_20MS)
+                val headerBuffer = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
+
+                var sequenceNumber = 0
+                var droppedFrames = 0
+                var captureOverruns = 0
+                var lastReadNanoTime = System.nanoTime()
+
                 var levelSampleCount = 0
                 var levelSampleSumSquares = 0.0
                 var levelSamplePeak = 0.0
                 var lastEmitTime = System.currentTimeMillis()
 
                 while (isRecording && isActive) {
-                    val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: -1
+                    val readStartNs = System.nanoTime()
+                    val bytesRead = audioRecord?.read(chunkBuffer, 0, chunkBuffer.size, AudioRecord.READ_BLOCKING) ?: -1
+
                     if (bytesRead > 0) {
-                        outputStream.write(buffer, 0, bytesRead)
+                        val captureTimestampNs = System.nanoTime()
+                        val intervalMs = (captureTimestampNs - lastReadNanoTime) / 1_000_000
+                        lastReadNanoTime = captureTimestampNs
+
+                        // Detect hardware capture overrun if read interval is significantly longer than 1 frame (> 35ms)
+                        var flags: Short = 0
+                        if (intervalMs > 35 && sequenceNumber > 0) {
+                            captureOverruns++
+                            flags = (flags.toInt() or FLAG_OVERRUN_DETECTED).toShort()
+                            Log.w(TAG, "Capture overrun detected! Gap: ${intervalMs}ms (Total overruns: $captureOverruns)")
+                        }
+
+                        // Write packet header with accurate monotonic timestamp (HEADER_SIZE = 24 bytes)
+                        headerBuffer.clear()
+                        headerBuffer.put(MAGIC_HEADER_BYTES) // 4 bytes: 'M', 'M', 'A', 'U'
+                        headerBuffer.putShort(PROTOCOL_VERSION) // 2 bytes: v1
+                        headerBuffer.putShort(flags) // 2 bytes: flags
+                        headerBuffer.putInt(sequenceNumber++) // 4 bytes: sequence
+                        headerBuffer.putLong(captureTimestampNs) // 8 bytes: monotonic timestamp in nanoseconds
+                        headerBuffer.putInt(bytesRead) // 4 bytes: payload length
+
+                        outputStream.write(headerBuffer.array(), 0, HEADER_SIZE)
+                        outputStream.write(chunkBuffer, 0, bytesRead)
+                        outputStream.flush()
 
                         // Compute audio level for monitoring
                         for (i in 0 until bytesRead - 1 step 2) {
-                            val sample = (buffer[i].toInt() and 0xFF) or (buffer[i + 1].toInt() shl 8)
+                            val sample = (chunkBuffer[i].toInt() and 0xFF) or (chunkBuffer[i + 1].toInt() shl 8)
                             val shortSample = sample.toShort()
                             val absNorm = abs(shortSample.toDouble()) / 32768.0
                             if (absNorm > levelSamplePeak) levelSamplePeak = absNorm
@@ -177,6 +213,7 @@ class AudioCaptureService : Service() {
                         }
                     } else if (bytesRead < 0) {
                         Log.w(TAG, "AudioRecord read returned error code: $bytesRead")
+                        droppedFrames++
                         break
                     }
                 }
@@ -251,6 +288,15 @@ class AudioCaptureService : Service() {
         const val SOCKET_NAME = "sndcpy"
         const val SAMPLE_RATE = 48000
         const val BUFFER_SIZE = 4096
+
+        // Low-latency framing constants
+        val MAGIC_HEADER_BYTES = byteArrayOf('M'.code.toByte(), 'M'.code.toByte(), 'A'.code.toByte(), 'U'.code.toByte()) // "MMAU"
+        const val PROTOCOL_VERSION: Short = 1
+        const val HEADER_SIZE = 24
+        const val FRAME_SIZE_10MS = 1920 // 480 samples * 4 bytes
+        const val FRAME_SIZE_20MS = 3840 // 960 samples * 4 bytes
+        const val FLAG_OVERRUN_DETECTED: Short = 0x0001
+        const val FLAG_CLOCK_SYNC: Short = 0x0002
 
         const val ACTION_START = "com.mobilemirror.audioagent.ACTION_START"
         const val ACTION_STOP = "com.mobilemirror.audioagent.ACTION_STOP"

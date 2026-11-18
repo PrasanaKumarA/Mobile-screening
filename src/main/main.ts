@@ -170,6 +170,10 @@ function createWindow(): void {
     mainWindow?.webContents.send('audioCompanion:pcm', chunk);
   });
 
+  audioCompanionService.on('pcm-chunk', (payload) => {
+    mainWindow?.webContents.send('audioCompanion:pcmChunk', payload);
+  });
+
   // Forward OBS WebSocket service events to renderer
   obsWebSocketService.on('status-changed', (data) => {
     mainWindow?.webContents.send('obs:statusChanged', data);
@@ -415,6 +419,19 @@ ipcMain.handle('audioCompanion:getAudioRoute', async (_event, deviceId: string) 
 
 ipcMain.handle('audioCompanion:getSyncMetrics', async () => {
   return audioCompanionService.getSyncMetrics();
+});
+
+ipcMain.handle('audioCompanion:getDetailedSyncMetrics', async () => {
+  return audioCompanionService.getDetailedSyncMetrics();
+});
+
+ipcMain.handle('audioCompanion:setTargetBufferLatency', async (_event, targetMs: number) => {
+  audioCompanionService.setTargetBufferLatency(targetMs);
+  return { success: true, targetMs };
+});
+
+ipcMain.handle('audioCompanion:calibrateClock', async (_event, deviceId?: string) => {
+  return audioCompanionService.calibrateClock(deviceId);
 });
 
 ipcMain.handle('audioCompanion:setSyncOffset', async (_event, offsetMs: number) => {

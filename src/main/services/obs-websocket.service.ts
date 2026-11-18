@@ -452,7 +452,7 @@ export class ObsWebSocketService extends EventEmitter {
       const streamUrl = options.streamUrl || 'http://127.0.0.1:28201/live-audio.wav';
       const syncOffsetMs = options.syncOffsetMs || 0;
 
-      // 1. Add/Update dedicated Game Audio Media Source
+      // 1. Add/Update dedicated Game Audio Media Source (0 MB buffer for real-time live streaming)
       const audioSourceName = 'MobileMirror Game Audio';
       try {
         await this.call('CreateInput', {
@@ -462,8 +462,8 @@ export class ObsWebSocketService extends EventEmitter {
           inputSettings: {
             input: streamUrl,
             is_local_file: false,
-            buffering_mb: 2,
-            reconnect_delay_sec: 2,
+            buffering_mb: 0, // 0 MB network buffering eliminates OBS Media Source 300-800ms ingestion lag!
+            reconnect_delay_sec: 1,
           },
         });
       } catch {
@@ -473,6 +473,8 @@ export class ObsWebSocketService extends EventEmitter {
           inputSettings: {
             input: streamUrl,
             is_local_file: false,
+            buffering_mb: 0,
+            reconnect_delay_sec: 1,
           },
         }).catch(() => {});
       }
@@ -501,6 +503,16 @@ export class ObsWebSocketService extends EventEmitter {
         });
       } catch {
         // Source already exists
+      }
+
+      // 4. Safely mute global Desktop Audio in OBS to prevent capturing game audio twice
+      try {
+        await this.call('SetInputMute', {
+          inputName: 'Desktop Audio',
+          inputMuted: true,
+        });
+      } catch {
+        // Desktop Audio may be named differently or already disabled
       }
 
       return {

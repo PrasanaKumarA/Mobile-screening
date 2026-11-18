@@ -222,6 +222,41 @@ export interface AudioSyncMetrics {
   channels: number;
 }
 
+export interface DetailedSyncMetrics extends AudioSyncMetrics {
+  captureFrameDurationMs: number;
+  averageSampleWaitingMs: number;
+  transportLatencyMs: number;
+  captureToReceiverLatencyMs: number;
+  averageCaptureToReceiverMs: number;
+  bufferingLatencyMs: number;
+  wasapiConfiguredBufferMs: number;
+  actualPhysicalDacLatencyMs: number;
+  playbackLatencyMs: number;
+  receiverToPlaybackLatencyMs: number;
+  totalAudioLatencyMs: number;
+  obsIngestionLatencyMs: number;
+  totalObsAudioLatencyMs: number;
+  videoLatencyMs: number;
+  estimatedAvOffsetMs: number;
+  obsAvOffsetMs: number;
+  packetJitterMs: number;
+  clockOffsetMs: number;
+  clockDriftPpm: number;
+  overrunCount: number;
+  droppedPackets: number;
+  targetBufferLatencyMs: number;
+  activeCorrectionMs: number;
+}
+
+export interface PcmPacketPayload {
+  pcm: Uint8Array;
+  captureTimeMs: number;
+  arrivalTimeMs: number;
+  sequenceNumber: number;
+  transportLatencyMs: number;
+  isOverrun?: boolean;
+}
+
 export type ObsConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export interface ObsStatusInfo {
@@ -319,10 +354,14 @@ export interface ElectronAPI {
     getStats: () => Promise<CompanionAudioStats>;
     getAudioRoute: (deviceId: string) => Promise<AudioRouteInfo>;
     getSyncMetrics?: () => Promise<AudioSyncMetrics>;
+    getDetailedSyncMetrics?: () => Promise<DetailedSyncMetrics>;
     setSyncOffset?: (offsetMs: number) => Promise<{ success: boolean; offsetMs: number }>;
+    setTargetBufferLatency?: (targetMs: number) => Promise<{ success: boolean; targetMs: number }>;
+    calibrateClock?: (deviceId?: string) => Promise<{ success: boolean; clockOffsetMs: number; rttMs: number }>;
     onStatusChanged: (callback: (data: { status: CompanionAudioStatus; deviceId?: string; streamUrl?: string; error?: string }) => void) => void;
     onAudioLevel: (callback: (metrics: AudioLevelMetrics) => void) => void;
     onPcmData?: (callback: (chunk: Uint8Array) => void) => void;
+    onPcmChunk?: (callback: (payload: PcmPacketPayload) => void) => void;
   };
   obs?: {
     connect: (url?: string, password?: string) => Promise<{ success: boolean; version?: string; error?: string }>;

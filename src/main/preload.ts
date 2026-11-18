@@ -59,8 +59,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAudioRoute: (deviceId: string) =>
       ipcRenderer.invoke('audioCompanion:getAudioRoute', deviceId),
     getSyncMetrics: () => ipcRenderer.invoke('audioCompanion:getSyncMetrics'),
+    getDetailedSyncMetrics: () =>
+      ipcRenderer.invoke('audioCompanion:getDetailedSyncMetrics'),
     setSyncOffset: (offsetMs: number) =>
       ipcRenderer.invoke('audioCompanion:setSyncOffset', offsetMs),
+    setTargetBufferLatency: (targetMs: number) =>
+      ipcRenderer.invoke('audioCompanion:setTargetBufferLatency', targetMs),
+    calibrateClock: (deviceId?: string) =>
+      ipcRenderer.invoke('audioCompanion:calibrateClock', deviceId),
     onStatusChanged: (callback: (data: any) => void) => {
       ipcRenderer.on('audioCompanion:statusChanged', (_event, data) =>
         callback(data)
@@ -73,6 +79,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     onPcmData: (callback: (chunk: Uint8Array) => void) => {
       ipcRenderer.on('audioCompanion:pcm', (_event, data) =>
+        callback(data)
+      );
+    },
+    onPcmChunk: (callback: (payload: any) => void) => {
+      ipcRenderer.on('audioCompanion:pcmChunk', (_event, data) =>
         callback(data)
       );
     },
